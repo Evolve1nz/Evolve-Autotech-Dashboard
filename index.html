@@ -456,7 +456,7 @@
   .mt-20 { margin-top: 20px; }
   .gap-10 { gap: 10px; }
   .flex { display: flex; }
-  .flex-between { display: flex; justify-content: space-between; align-items: center; }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
   .empty { color: var(--dim); font-size: 13px; padding: 16px 0; text-align: center; }
   .api-key-note { background: rgba(42,109,181,.12); border: 1px solid rgba(42,109,181,.3); border-radius: var(--radius); padding: 12px 14px; font-size: 12px; color: var(--silver); margin-bottom: 16px; }
   .api-key-note strong { color: var(--blue3); }
@@ -746,7 +746,10 @@
   <div class="panel">
     <div class="flex-between" style="margin-bottom:10px;">
       <div class="panel-title" style="margin-bottom:0;">Results <span class="subsection" id="rego-count"></span></div>
-      <button class="btn btn-ghost btn-sm" onclick="copyRegoResults()">Copy TSV</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" onclick="copyRegoForInvoice()">📋 Copy for Invoice</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyRegoForSheets()">📊 Copy for Sheets</button>
+      </div>
     </div>
     <div class="rego-results" id="rego-output">Results will appear here. Ready to paste into Google Sheets.</div>
   </div>
@@ -1302,9 +1305,17 @@ async function extractRegos() {
   }
   const combined = results.join('\n');
   out.textContent = combined;
-  const count = combined.split('\n').filter(l=>l.trim()).length;
+  regoRows = combined.split('\n').map(l=>l.trim()).filter(l=>l && !l.startsWith('Error:') && !l.startsWith('No result')).map(l=>{
+    const parts = l.split('\t');
+    return { rego: (parts[0]||'').trim(), date: (parts[1]||'—').trim() };
+  }).filter(r=>r.rego);
+  regoClientUsed = client;
+  const count = regoRows.length;
   $('rego-count').textContent = `— ${count} vehicle${count!==1?'s':''}`;
 }
+
+let regoRows = [];
+let regoClientUsed = '';
 
 function fileToBase64(file) {
   return new Promise((res,rej)=>{
@@ -1315,12 +1326,20 @@ function fileToBase64(file) {
   });
 }
 
-function copyRegoResults() {
-  const text = $('rego-output').textContent;
-  navigator.clipboard.writeText(text).then(()=>alert('Copied to clipboard — paste into Google Sheets.'));
+function copyRegoForInvoice() {
+  if(!regoRows.length) return alert('Extract some rego plates first.');
+  const text = regoRows.map(r=>r.rego).join(', ');
+  navigator.clipboard.writeText(text).then(()=>alert('Copied — paste into an invoice line item description.'));
 }
 
-function clearRegoResults() { regoFiles=[]; renderRegoThumbs(); $('rego-output').textContent='Results will appear here. Ready to paste into Google Sheets.'; $('rego-count').textContent=''; }
+function copyRegoForSheets() {
+  if(!regoRows.length) return alert('Extract some rego plates first.');
+  const client = regoClientUsed || $('rego-client').value || '';
+  const text = regoRows.map(r=>`${r.rego}\t${r.date}\t${client}`).join('\n');
+  navigator.clipboard.writeText(text).then(()=>alert('Copied — paste into Google Sheets (Rego / Date / Client columns).'));
+}
+
+function clearRegoResults() { regoFiles=[]; regoRows=[]; renderRegoThumbs(); $('rego-output').textContent='Results will appear here. Ready to paste into Google Sheets.'; $('rego-count').textContent=''; }
 
 // ─── PRICE BOOK ───────────────────────────────────────────────────────────────
 let priceBook = load('priceBook', [
