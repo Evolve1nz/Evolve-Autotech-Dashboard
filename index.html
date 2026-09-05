@@ -1281,7 +1281,7 @@ async function extractRegos() {
         headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
         body: JSON.stringify({
           model:'claude-sonnet-5',
-          max_tokens:500,
+          max_tokens:1024,
           messages:[{role:'user',content:[
             {type:'image',source:{type:'base64',media_type:file.type,data:b64}},
             {type:'text',text:`Extract ALL New Zealand vehicle registration plates visible in this image. For each plate, also note the inspection date if visible. Output ONLY as tab-separated values, one row per vehicle: REGO[TAB]DATE. If no date visible, put a dash. No headers, no explanation, just the data rows.${client?' Client: '+client:''}`}
@@ -1295,7 +1295,7 @@ async function extractRegos() {
         throw new Error(msg);
       }
       const data = await resp.json();
-      const text = data.content?.[0]?.text || 'No result';
+      const text = data.content?.[0]?.text || `No result (stop_reason: ${data.stop_reason||'unknown'})`;
       results.push(text.trim());
     } catch(e) { results.push(`Error: ${e.message}`); }
   }
