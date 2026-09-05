@@ -1278,9 +1278,9 @@ async function extractRegos() {
     try {
       const resp = await fetch('https://api.anthropic.com/v1/messages',{
         method:'POST',
-        headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},
+        headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
         body: JSON.stringify({
-          model:'claude-opus-4-5',
+          model:'claude-sonnet-5',
           max_tokens:500,
           messages:[{role:'user',content:[
             {type:'image',source:{type:'base64',media_type:file.type,data:b64}},
@@ -1288,6 +1288,12 @@ async function extractRegos() {
           ]}]
         })
       });
+      if(!resp.ok) {
+        const errBody = await resp.text();
+        let msg = `HTTP ${resp.status}`;
+        try { msg = JSON.parse(errBody).error?.message || msg; } catch(e) {}
+        throw new Error(msg);
+      }
       const data = await resp.json();
       const text = data.content?.[0]?.text || 'No result';
       results.push(text.trim());
