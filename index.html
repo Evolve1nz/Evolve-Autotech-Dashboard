@@ -460,6 +460,18 @@
   .empty { color: var(--dim); font-size: 13px; padding: 16px 0; text-align: center; }
   .api-key-note { background: rgba(42,109,181,.12); border: 1px solid rgba(42,109,181,.3); border-radius: var(--radius); padding: 12px 14px; font-size: 12px; color: var(--silver); margin-bottom: 16px; }
   .api-key-note strong { color: var(--blue3); }
+
+  @media print {
+    body * { visibility: hidden; }
+    #invoice-preview, #invoice-preview * { visibility: visible; }
+    #invoice-preview {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      margin: 0;
+      box-shadow: none;
+    }
+  }
 </style>
 </head>
 <body>
