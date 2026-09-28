@@ -1158,6 +1158,7 @@ function renderInvoiceRegister() {
 async function freezeImagesToCanvas(root) {
   const imgs = Array.from(root.querySelectorAll('img'));
   for(const img of imgs) {
+    if(img.style.visibility === 'hidden') continue;
     try {
       const src = new Image();
       src.src = img.src;
@@ -1200,6 +1201,24 @@ async function shareInvoicePDF(btn) {
 
     // html2canvas drops <img> tags on iOS Safari (blank logo). Draw each image
     // onto a canvas ourselves first - html2canvas copies canvases reliably.
+    // The logo still comes out blank on iPhone, so it's hidden here and stamped
+    // straight onto the PDF page afterwards (no html2canvas involved).
+    let logoStamp = null;
+    const logoEl = clone.querySelector('.inv-logo-badge img');
+    if(logoEl) {
+      try {
+        const cr = clone.getBoundingClientRect(), lr = logoEl.getBoundingClientRect();
+        const li = new Image(); li.src = logoEl.src;
+        if(li.decode) await li.decode(); else await new Promise((res,rej)=>{ li.onload=res; li.onerror=rej; });
+        const lc = document.createElement('canvas');
+        lc.width = Math.round(lr.width*3); lc.height = Math.round(lr.height*3);
+        const lx = lc.getContext('2d');
+        lx.fillStyle = '#0b1220'; lx.fillRect(0,0,lc.width,lc.height);
+        lx.drawImage(li,0,0,lc.width,lc.height);
+        logoStamp = {data: lc.toDataURL('image/jpeg',0.95), x: lr.left-cr.left, y: lr.top-cr.top, w: lr.width, h: lr.height, pageW: cr.width};
+        logoEl.style.visibility = 'hidden';
+      } catch(e) { console.warn('Logo prep failed', e); }
+    }
     await freezeImagesToCanvas(clone);
     await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
 
@@ -1213,6 +1232,10 @@ async function shareInvoicePDF(btn) {
     const imgHeight = canvas.height * imgWidth / canvas.width;
     let heightLeft = imgHeight, position = 0;
     pdf.addImage(imgData,'PNG',0,position,imgWidth,imgHeight);
+    if(logoStamp) {
+      const k = imgWidth / logoStamp.pageW;
+      pdf.addImage(logoStamp.data,'JPEG', logoStamp.x*k, logoStamp.y*k, logoStamp.w*k, logoStamp.h*k);
+    }
     heightLeft -= pageHeight;
     while(heightLeft > 0) {
       position = heightLeft - imgHeight;
