@@ -629,7 +629,7 @@
       </div>
       <div class="panel" style="margin-top:14px;">
         <div class="panel-title">Job Photos <span class="subsection">Attach to this invoice/quote</span></div>
-        <input type="file" id="inv-photo-input" accept="image/*" capture="environment" multiple style="display:none" onchange="handlePhotoUpload(event)">
+        <input type="file" id="inv-photo-input" accept="image/*" multiple style="display:none" onchange="handlePhotoUpload(event)">
         <div class="btn-row">
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('inv-photo-input').click()">📷 Add Photo</button>
         </div>
@@ -938,8 +938,9 @@ function exportRunSheet() {
 let lineItems = [];
 let invCounter = load('invCounter', 1);
 
+let lineItemIdCounter = 1;
 function addLineItem(cat='', desc='', qty=1, price=0) {
-  const id = Date.now();
+  const id = lineItemIdCounter++;
   lineItems.push({id, cat, desc, qty, price});
   renderLineItems();
 }
@@ -950,9 +951,9 @@ function renderLineItems() {
       <select style="font-size:12px;padding:6px;" onchange="updateLineItem(${item.id},'cat',this.value)">
         ${['Labour','Parts','WOF','Service','Inspection','Other'].map(c=>`<option ${item.cat===c?'selected':''}>${c}</option>`).join('')}
       </select>
-      <input type="text" style="font-size:12px;padding:6px;" value="${item.desc}" placeholder="Description" onchange="updateLineItem(${item.id},'desc',this.value)">
-      <input type="number" style="font-size:12px;padding:6px;" value="${item.qty}" min="0.5" step="0.5" onchange="updateLineItem(${item.id},'qty',this.value)">
-      <input type="number" style="font-size:12px;padding:6px;" value="${item.price}" min="0" step="1" placeholder="$ excl" onchange="updateLineItem(${item.id},'price',this.value)">
+      <input type="text" style="font-size:12px;padding:6px;" value="${item.desc}" placeholder="Description" oninput="updateLineItem(${item.id},'desc',this.value)">
+      <input type="number" style="font-size:12px;padding:6px;" value="${item.qty}" min="0.5" step="0.5" oninput="updateLineItem(${item.id},'qty',this.value)">
+      <input type="number" style="font-size:12px;padding:6px;" value="${item.price}" min="0" step="1" placeholder="$ excl" oninput="updateLineItem(${item.id},'price',this.value)">
       <button class="btn btn-danger btn-sm" style="padding:4px 8px;" onclick="removeLineItem(${item.id})">✕</button>
     </div>`).join('');
 }
@@ -1110,7 +1111,7 @@ function reopenInvoice(id) {
   $('inv-date').value = inv.date; $('inv-due').value = inv.due||'';
   $('inv-cust-name').value = inv.custName; $('inv-cust-addr').value = inv.custAddr||'';
   $('inv-vehicle').value = inv.vehicle||''; $('inv-notes').value = inv.notes||'';
-  lineItems = JSON.parse(JSON.stringify(inv.lineItems||[]));
+  lineItems = (inv.lineItems||[]).map(i=>({...i, id: lineItemIdCounter++}));
   invoicePhotos = JSON.parse(JSON.stringify(inv.photos||[]));
   renderLineItems();
   renderInvoicePhotos();
@@ -1154,6 +1155,28 @@ function renderInvoiceRegister() {
   `;
 }
 
+async function freezeImagesToCanvas(root) {
+  const imgs = Array.from(root.querySelectorAll('img'));
+  for(const img of imgs) {
+    try {
+      const src = new Image();
+      src.src = img.src;
+      if(src.decode) await src.decode();
+      else await new Promise((res,rej)=>{ src.onload=res; src.onerror=rej; });
+      const r = img.getBoundingClientRect();
+      const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+      const c = document.createElement('canvas');
+      c.width = w*2; c.height = h*2;
+      const nw = src.naturalWidth, nh = src.naturalHeight;
+      const k = Math.max(c.width/nw, c.height/nh); // 'cover' fit, matches photo thumbnails
+      const dw = nw*k, dh = nh*k;
+      c.getContext('2d').drawImage(src, (c.width-dw)/2, (c.height-dh)/2, dw, dh);
+      c.style.cssText = 'width:'+w+'px;height:'+h+'px;display:block;';
+      img.parentNode.replaceChild(c, img);
+    } catch(e) { console.warn('Image prep failed', e); }
+  }
+}
+
 async function shareInvoicePDF(btn) {
   const preview = $('invoice-preview');
   if(preview.style.display !== 'block') generateInvoice();
@@ -1175,9 +1198,10 @@ async function shareInvoicePDF(btn) {
     clone.style.background = '#ffffff';
     document.body.appendChild(clone);
 
-    // Make sure the logo (and any other images) are fully decoded before capture
-    const imgs = Array.from(clone.querySelectorAll('img'));
-    await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(res => { img.onload = res; img.onerror = res; })));
+    // html2canvas drops <img> tags on iOS Safari (blank logo). Draw each image
+    // onto a canvas ourselves first - html2canvas copies canvases reliably.
+    await freezeImagesToCanvas(clone);
+    await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
 
     const canvas = await html2canvas(clone, {scale:2, backgroundColor:'#ffffff', useCORS:true, allowTaint:true});
     const imgData = canvas.toDataURL('image/png');
