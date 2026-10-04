@@ -724,6 +724,22 @@
 <div class="tab-panel active" id="tab-home">
   <div class="section-title">Dashboard <span class="subsection">Evolve Autotech Operations</span></div>
   <div class="home-grid" id="stat-cards"></div>
+  <div class="panel" id="backup-panel" style="margin-bottom:16px;">
+    <div class="flex-between" style="margin-bottom:6px;">
+      <div class="panel-title" style="margin-bottom:0;">Backup</div>
+      <span class="badge badge-amber" id="bk-badge">Never backed up</span>
+    </div>
+    <div class="stat-sub">One file with your jobs, invoices, GST, expenses, customers, price book, mileage, leads and receipt photos. Your API key is not included.</div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px;text-transform:none;letter-spacing:0;"><input type="checkbox" id="bk-photos" checked style="width:auto;margin:0;"> Include receipt photos</label>
+    <div class="btn-row">
+      <button class="btn btn-primary btn-sm" onclick="bkExport()">Back up now</button>
+      <button class="btn btn-ghost btn-sm" onclick="bkPick('replace')">Restore</button>
+      <button class="btn btn-ghost btn-sm" onclick="bkPick('merge')">Merge</button>
+    </div>
+    <div class="btn-row" id="bk-undo-row" style="display:none;margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="bkUndo()">Undo last restore</button></div>
+    <div class="stat-sub" id="bk-status" style="margin-top:10px;"></div>
+    <input type="file" id="bk-file" accept=".json,application/json" style="display:none" onchange="bkRead(this)">
+  </div>
   <div class="section-title" style="font-size:15px;">Quick Actions</div>
   <div class="home-grid">
     <div class="quick-link" onclick="showTab('schedule')"><div class="ql-title">Job Schedule</div><div class="ql-desc">View & add jobs for the week</div></div>
@@ -1174,7 +1190,7 @@ function showTab(id) {
   // fix nav active by index
   const tabMap = ['home','schedule','pipeline','invoice','gst','expenses','customers','rego','pricebook','mileage'];
   document.querySelectorAll('nav button')[tabMap.indexOf(id)]?.classList.add('active');
-  if(id==='home') refreshHome();
+  if(id==='home') { refreshHome(); bkRefresh(); }
   if(id==='expenses') renderExpenses();
 }
 
@@ -2394,6 +2410,133 @@ async function expRestore(inp) {
 }
 
 renderExpenses();
+
+// ─── BACKUP / RESTORE (whole app) ─────────────────────────────────────────────
+const BK_SKIP = ['evolve_regoApiKey','evolve_lastBackup'];
+let bkMode = 'replace';
+const bkSize = b => b > 1048576 ? (b/1048576).toFixed(1) + ' MB' : Math.round(b/1024) + ' KB';
+
+function bkKeys() { const k = []; for(let i=0;i<localStorage.length;i++){ const n = localStorage.key(i); if(n && n.startsWith('evolve_') && !BK_SKIP.includes(n)) k.push(n); } return k; }
+function bkCollectData() { const d = {}; bkKeys().forEach(n => { try { d[n.slice(7)] = JSON.parse(localStorage.getItem(n)); } catch(e) {} }); return d; }
+
+async function bkIdbAll() { const db = await idbOpen(); return new Promise((res,rej) => { const out = {}; const q = db.transaction('img').objectStore('img').openCursor(); q.onsuccess = () => { const c = q.result; if(c){ out[c.key] = c.value; c.continue(); } else res(out); }; q.onerror = () => rej(q.error); }); }
+async function bkIdbClear() { const db = await idbOpen(); return new Promise((res,rej) => { const t = db.transaction('img','readwrite'); t.objectStore('img').clear(); t.oncomplete = res; t.onerror = () => rej(t.error); }); }
+
+// Safety snapshot, kept in its own IndexedDB so it never competes with localStorage space
+function bkSnapDb() { return new Promise((res,rej) => { const r = indexedDB.open('evolve_safety',1); r.onupgradeneeded = () => r.result.createObjectStore('snap'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function bkSnapPut(obj) { const db = await bkSnapDb(); return new Promise((res,rej) => { const t = db.transaction('snap','readwrite'); t.objectStore('snap').put(obj,'prerestore'); t.oncomplete = res; t.onerror = () => rej(t.error); }); }
+async function bkSnapGet() { const db = await bkSnapDb(); return new Promise((res,rej) => { const q = db.transaction('snap').objectStore('snap').get('prerestore'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+async function bkSaveSnapshot() { await bkSnapPut({ taken:Date.now(), data:bkCollectData(), images: await bkIdbAll() }); }
+
+async function bkRefresh() {
+  const t = Number(localStorage.getItem('evolve_lastBackup')) || 0;
+  const days = t ? Math.floor((Date.now() - t) / 86400000) : null;
+  const b = $('bk-badge'); if(!b) return;
+  if(days === null) { b.textContent = 'Never backed up'; b.className = 'badge badge-amber'; }
+  else if(days > 7) { b.textContent = 'Last backup ' + days + ' days ago'; b.className = 'badge badge-amber'; }
+  else { b.textContent = days === 0 ? 'Backed up today' : 'Last backup ' + days + (days===1?' day':' days') + ' ago'; b.className = 'badge badge-green'; }
+  try { $('bk-undo-row').style.display = (await bkSnapGet()) ? 'flex' : 'none'; } catch(e) {}
+}
+
+async function bkExport() {
+  const st = $('bk-status'); st.textContent = 'Preparing backup…';
+  try {
+    const data = bkCollectData(), images = {}; let n = 0;
+    if($('bk-photos').checked) {
+      const all = await bkIdbAll();
+      for(const k in all) { images[k] = 'data:image/jpeg;base64,' + await fileToBase64(all[k]); n++; }
+    }
+    const payload = { app:'evolve-dashboard', version:1, created:new Date().toISOString(), data, images };
+    const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
+    const name = 'evolve-backup-' + today() + '.json';
+    let shared = false;
+    try {
+      const file = new File([blob], name, {type:'application/json'});
+      if(navigator.canShare && navigator.canShare({files:[file]})) { await navigator.share({files:[file], title:name}); shared = true; }
+    } catch(e) { if(e && e.name === 'AbortError') { st.textContent = 'Backup cancelled.'; return; } }
+    if(!shared) expDownload(name, blob);
+    localStorage.setItem('evolve_lastBackup', String(Date.now()));
+    st.textContent = 'Backup saved: ' + bkSize(blob.size) + (n ? ', ' + n + ' receipt photo' + (n===1?'':'s') : '') + '.';
+    bkRefresh();
+  } catch(e) { st.textContent = 'Backup failed: ' + e.message; }
+}
+
+function bkPick(mode) { bkMode = mode; $('bk-file').click(); }
+
+function bkSummary(data, imgCount) {
+  const labels = {invoices:'invoices', customers:'customers', expenses:'expenses', gstEntries:'GST entries', jobs:'jobs', trips:'trips', leads:'leads', priceBook:'price book items'};
+  const parts = Object.keys(labels).filter(k => Array.isArray(data[k]) && data[k].length).map(k => data[k].length + ' ' + labels[k]);
+  if(imgCount) parts.push(imgCount + ' receipt photo' + (imgCount===1?'':'s'));
+  return parts.length ? parts.join(', ') : 'no records';
+}
+
+const bkItemKey = x => (x && x.id != null) ? 'id:' + x.id : 'j:' + JSON.stringify(x);
+
+async function bkApply(p, mode) {
+  const incoming = p.data, images = p.images || {};
+  if(mode === 'replace') {
+    bkKeys().forEach(n => localStorage.removeItem(n));
+    await bkIdbClear();
+    for(const k in incoming) localStorage.setItem('evolve_' + k, JSON.stringify(incoming[k]));
+    for(const k in images) await idbPut(Number(k), await (await fetch(images[k])).blob());
+  } else {
+    for(const k in incoming) {
+      const cur = localStorage.getItem('evolve_' + k), inc = incoming[k];
+      if(cur === null) { localStorage.setItem('evolve_' + k, JSON.stringify(inc)); continue; }
+      const loc = JSON.parse(cur);
+      if(Array.isArray(loc) && Array.isArray(inc)) {
+        const have = new Set(loc.map(bkItemKey));
+        localStorage.setItem('evolve_' + k, JSON.stringify(loc.concat(inc.filter(x => !have.has(bkItemKey(x))))));
+      } else if(k === 'invCounter') {
+        localStorage.setItem('evolve_' + k, JSON.stringify(Math.max(Number(loc)||1, Number(inc)||1)));
+      }
+    }
+    const have = await bkIdbAll();
+    for(const k in images) if(!(k in have)) await idbPut(Number(k), await (await fetch(images[k])).blob());
+  }
+}
+
+async function bkRestoreSnapshot() {
+  const s = await bkSnapGet(); if(!s) throw new Error('no saved snapshot');
+  bkKeys().forEach(n => localStorage.removeItem(n));
+  await bkIdbClear();
+  for(const k in s.data) localStorage.setItem('evolve_' + k, JSON.stringify(s.data[k]));
+  for(const k in s.images) await idbPut(Number(k), s.images[k]);
+}
+
+async function bkRead(inp) {
+  const file = inp.files[0]; inp.value = ''; if(!file) return;
+  const st = $('bk-status'); let p;
+  try { p = JSON.parse(await file.text()); } catch(e) { st.textContent = 'That file could not be read as a backup.'; return; }
+  if(!p || p.app !== 'evolve-dashboard' || !p.data || typeof p.data !== 'object') { st.textContent = 'That is not a full dashboard backup. Expenses-only backups restore from the Expenses tab.'; return; }
+  if(p.version > 1) { st.textContent = 'That backup is from a newer version of the dashboard. Update the app first.'; return; }
+  const imgs = p.images ? Object.keys(p.images).length : 0;
+  const when = p.created ? new Date(p.created).toLocaleString('en-NZ') : 'unknown date';
+  const msg = bkMode === 'replace'
+    ? 'Replace everything on this device with the backup from ' + when + '?\n\n' + bkSummary(p.data, imgs) + '\n\nYour current data is saved first, so you can undo.'
+    : 'Merge the backup from ' + when + ' into this device? Records already here are kept and only missing ones are added.\n\n' + bkSummary(p.data, imgs);
+  if(!confirm(msg)) { st.textContent = 'Restore cancelled.'; return; }
+  st.textContent = 'Restoring…';
+  try { await bkSaveSnapshot(); } catch(e) { st.textContent = 'Could not save a safety copy first, so nothing was changed.'; return; }
+  try {
+    await bkApply(p, bkMode);
+    st.textContent = 'Done. Reloading…';
+    setTimeout(() => location.reload(), 600);
+  } catch(e) {
+    try { await bkRestoreSnapshot(); st.textContent = 'Restore failed (' + e.message + '). Your previous data was put back.'; setTimeout(() => location.reload(), 1500); }
+    catch(e2) { st.textContent = 'Restore failed (' + e.message + '). Use Undo last restore to put your previous data back.'; }
+  }
+}
+
+async function bkUndo() {
+  let s; try { s = await bkSnapGet(); } catch(e) {}
+  if(!s) return;
+  if(!confirm('Put back the data you had before the last restore (saved ' + new Date(s.taken).toLocaleString('en-NZ') + ')?')) return;
+  try { await bkRestoreSnapshot(); $('bk-status').textContent = 'Previous data restored. Reloading…'; setTimeout(() => location.reload(), 600); }
+  catch(e) { $('bk-status').textContent = 'Undo failed: ' + e.message; }
+}
+
+bkRefresh();
 </script>
 
 </html>
