@@ -680,6 +680,19 @@
   /* due date quick terms */
   .terms { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .terms .btn { min-height: 36px; flex: 1 1 auto; padding: 6px 10px; font-size: 12px; }
+
+  /* ── iOS ZOOM FIX ───────────────────────────────────────────────── */
+  /* Safari zooms into any focused field under 16px and never zooms back out. */
+  @media (max-width: 900px) {
+    input, select, textarea,
+    .li-cat, .li-qty, .li-price {
+      font-size: 16px !important;
+    }
+  }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body { min-height: 100vh; min-height: 100dvh; }
+
+  .exp-thumb { width:44px; height:44px; object-fit:cover; border-radius:6px; border:1px solid var(--border2); cursor:pointer; background:var(--panel2); display:block; }
 </style>
 </head>
 <body>
@@ -698,6 +711,7 @@
   <button onclick="showTab('pipeline')">Pipeline</button>
   <button onclick="showTab('invoice')">Invoice</button>
   <button onclick="showTab('gst')">GST</button>
+  <button onclick="showTab('expenses')">Expenses</button>
   <button onclick="showTab('customers')">Customers</button>
   <button onclick="showTab('rego')">Rego Extractor</button>
   <button onclick="showTab('pricebook')">Price Book</button>
@@ -716,6 +730,7 @@
     <div class="quick-link" onclick="showTab('pipeline')"><div class="ql-title">Sales Pipeline</div><div class="ql-desc">Track prospecting & weekly conversion</div></div>
     <div class="quick-link" onclick="showTab('invoice')"><div class="ql-title">New Invoice</div><div class="ql-desc">Quote or invoice a customer</div></div>
     <div class="quick-link" onclick="showTab('gst')"><div class="ql-title">GST Calculator</div><div class="ql-desc">Track this period's GST</div></div>
+    <div class="quick-link" onclick="showTab('expenses')"><div class="ql-title">Expenses</div><div class="ql-desc">Capture receipts for GST</div></div>
     <div class="quick-link" onclick="showTab('customers')"><div class="ql-title">Customers</div><div class="ql-desc">WOF & service follow-ups</div></div>
     <div class="quick-link" onclick="showTab('rego')"><div class="ql-title">Rego Extractor</div><div class="ql-desc">Extract plates from Manheim screenshots</div></div>
     <div class="quick-link" onclick="showTab('pricebook')"><div class="ql-title">Price Book</div><div class="ql-desc">Labour & parts rates</div></div>
@@ -913,6 +928,72 @@
 </div>
 
 <!-- CUSTOMERS -->
+<div class="tab-panel" id="tab-expenses">
+  <div class="section-title">Expenses <span class="subsection">Receipt capture — feeds the GST tab</span></div>
+  <div class="grid-2" style="margin-bottom:16px;">
+    <div class="panel">
+      <div class="panel-title">Add Expense</div>
+      <div class="btn-row" style="margin-top:0;margin-bottom:12px;">
+        <button class="btn btn-primary" onclick="$('exp-cam').click()">Scan Receipt</button>
+        <button class="btn btn-ghost" onclick="$('exp-pick').click()">Choose Photo</button>
+      </div>
+      <input type="file" id="exp-cam" accept="image/*" capture="environment" style="display:none" onchange="expPhoto(this)">
+      <input type="file" id="exp-pick" accept="image/*" style="display:none" onchange="expPhoto(this)">
+      <div id="exp-preview" style="margin-bottom:8px;"></div>
+      <div id="exp-status" class="stat-sub" style="margin-bottom:8px;"></div>
+      <label>Supplier</label>
+      <input type="text" id="exp-supplier" placeholder="e.g. Repco Glen Eden">
+      <label>Description</label>
+      <input type="text" id="exp-desc" placeholder="e.g. Brake pads for Corolla">
+      <label>Date</label>
+      <input type="date" id="exp-date">
+      <label>Total (GST inclusive, NZD)</label>
+      <input type="number" id="exp-total" step="0.01" placeholder="0.00" oninput="expAutoGst()">
+      <label>GST on receipt (NZD)</label>
+      <input type="number" id="exp-gst" step="0.01" placeholder="0.00" oninput="expGstTouched=true">
+      <label>Category</label>
+      <select id="exp-cat"></select>
+      <label>Job / Rego (optional)</label>
+      <input type="text" id="exp-ref" placeholder="e.g. ABC123">
+      <label>Paid with</label>
+      <select id="exp-paid"><option>Business account</option><option>Cash</option><option>Personal (reimburse)</option></select>
+      <label>Supplier GST number on receipt</label>
+      <select id="exp-gstno"><option value="1">Yes</option><option value="0">No</option></select>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveExpense()">Save Expense</button>
+        <button class="btn btn-danger" onclick="expReset()">Clear</button>
+      </div>
+    </div>
+    <div>
+      <div class="panel" style="margin-bottom:14px;">
+        <div class="panel-title">Filter &amp; Export</div>
+        <label>Month (blank = all)</label>
+        <input type="month" id="exp-month" onchange="renderExpenses()">
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" onclick="expCSV()">Export CSV</button>
+          <button class="btn btn-ghost btn-sm" onclick="expBackup()">Backup Data</button>
+          <button class="btn btn-ghost btn-sm" onclick="$('exp-restore').click()">Restore Backup</button>
+        </div>
+        <input type="file" id="exp-restore" accept=".json" style="display:none" onchange="expRestore(this)">
+      </div>
+      <div class="grid-2" style="gap:10px;">
+        <div class="stat-card highlight"><div class="stat-label">Total Spent</div><div class="stat-value" id="exp-stat-total">$0</div><div class="stat-sub">GST incl.</div></div>
+        <div class="stat-card"><div class="stat-label">GST to Claim</div><div class="stat-value" id="exp-stat-gst">$0</div><div class="stat-sub">Box 13</div></div>
+        <div class="stat-card"><div class="stat-label">Receipts</div><div class="stat-value" id="exp-stat-count">0</div><div class="stat-sub">In this view</div></div>
+        <div class="stat-card amber"><div class="stat-label">Check Invoice</div><div class="stat-value" id="exp-stat-flag">0</div><div class="stat-sub">Over $50, no GST number</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Receipts</div>
+    <div class="table-wrap">
+      <table><thead><tr><th></th><th>Date</th><th>Supplier</th><th>Category</th><th>Total</th><th>GST</th><th></th></tr></thead>
+      <tbody id="exp-tbody"></tbody></table>
+    </div>
+  </div>
+</div>
+<div id="exp-viewer" onclick="this.style.display='none'" style="display:none;position:fixed;inset:0;z-index:999;background:rgba(3,8,18,.92);align-items:center;justify-content:center;padding:16px;"><img id="exp-viewer-img" style="max-width:100%;max-height:100%;border-radius:8px;"></div>
+
 <div class="tab-panel" id="tab-customers">
   <div class="section-title">Customer Vehicle Log</div>
   <div class="panel" style="margin-bottom:14px;">
@@ -1091,9 +1172,10 @@ function showTab(id) {
   const btns = document.querySelectorAll('nav button');
   btns.forEach(b => { if(b.textContent.toLowerCase().includes(id === 'home' ? 'home' : id)) b.classList.add('active'); });
   // fix nav active by index
-  const tabMap = ['home','schedule','pipeline','invoice','gst','customers','rego','pricebook','mileage'];
+  const tabMap = ['home','schedule','pipeline','invoice','gst','expenses','customers','rego','pricebook','mileage'];
   document.querySelectorAll('nav button')[tabMap.indexOf(id)]?.classList.add('active');
   if(id==='home') refreshHome();
+  if(id==='expenses') renderExpenses();
 }
 
 // ─── HEADER DATE ─────────────────────────────────────────────────────────────
@@ -1535,6 +1617,7 @@ function invDateChanged() {
 
 // ─── GST ──────────────────────────────────────────────────────────────────────
 let gstEntries = load('gstEntries', []);
+const gstOf = e => (typeof e.gst==='number') ? e.gst : e.amount*3/23;
 
 function addGSTEntry() {
   const type=$('gst-type').value, desc=$('gst-desc').value.trim(), amt=parseFloat($('gst-amount').value)||0, date=$('gst-date').value;
@@ -1554,7 +1637,7 @@ function renderGST() {
   const totalSales = sales.reduce((s,e)=>s+e.amount,0);
   const totalExp = expenses.reduce((s,e)=>s+e.amount,0);
   const gstOnSales = totalSales * 3/23;
-  const gstOnPurchases = totalExp * 3/23;
+  const gstOnPurchases = expenses.reduce((s,e)=>s+gstOf(e),0);
   const netGST = gstOnSales - gstOnPurchases;
   $('gst-stat-sales').textContent = fmtMoney(totalSales);
   $('gst-stat-exp').textContent = fmtMoney(totalExp);
@@ -1571,7 +1654,7 @@ function renderGST() {
   if(!gstEntries.length){ tbody.innerHTML='<tr><td colspan="7" class="empty">No entries yet</td></tr>'; return; }
   const sorted = [...gstEntries].sort((a,b)=>b.date.localeCompare(a.date));
   tbody.innerHTML = sorted.map(e=>{
-    const gst = e.amount*3/23, exgst = e.amount - gst;
+    const gst = gstOf(e), exgst = e.amount - gst;
     return `<tr>
       <td class="mono">${e.date}</td>
       <td><span class="badge ${e.type==='sale'?'badge-green':'badge-amber'}">${e.type}</span></td>
@@ -2144,6 +2227,173 @@ renderCustomers();
 renderPriceBook();
 renderMileage();
 refreshHome();
+
+// ─── EXPENSES (receipt capture) ───────────────────────────────────────────────
+const EXP_CATS = ['Parts','Fuel','Tools & equipment','Consumables','Workshop rent','Vehicle running','Phone & software','Insurance','Other'];
+const EXP_MODEL = 'claude-sonnet-5-5';
+let expList = load('expenses', []), expBlob = null, expGstTouched = false;
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const r2 = n => Math.round(n*100)/100;
+$('exp-cat').innerHTML = EXP_CATS.map(c => `<option>${c}</option>`).join('');
+$('exp-date').value = today();
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch(e) {}
+
+function idbOpen() { return new Promise((res,rej) => { const r = indexedDB.open('evolve_receipts',1); r.onupgradeneeded = () => r.result.createObjectStore('img'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbPut(id, blob) { const db = await idbOpen(); return new Promise((res,rej) => { const t = db.transaction('img','readwrite'); t.objectStore('img').put(blob,id); t.oncomplete = res; t.onerror = () => rej(t.error); }); }
+async function idbGet(id) { const db = await idbOpen(); return new Promise((res,rej) => { const q = db.transaction('img').objectStore('img').get(id); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+async function idbDel(id) { const db = await idbOpen(); return new Promise((res,rej) => { const t = db.transaction('img','readwrite'); t.objectStore('img').delete(id); t.oncomplete = res; t.onerror = () => rej(t.error); }); }
+
+function compressImage(file, max=1600, q=0.72) {
+  return new Promise((res,rej) => {
+    const img = new Image(), u = URL.createObjectURL(file);
+    img.onload = () => {
+      const s = Math.min(1, max/Math.max(img.width,img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width*s); c.height = Math.round(img.height*s);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(u);
+      c.toBlob(b => b ? res(b) : rej(new Error('compress failed')), 'image/jpeg', q);
+    };
+    img.onerror = () => rej(new Error('unreadable image'));
+    img.src = u;
+  });
+}
+
+function expAutoGst() { if(expGstTouched) return; const t = parseFloat($('exp-total').value)||0; $('exp-gst').value = t ? (t*3/23).toFixed(2) : ''; }
+
+async function expPhoto(inp) {
+  const file = inp.files[0]; inp.value = '';
+  if(!file) return;
+  $('exp-status').textContent = 'Preparing photo…';
+  try {
+    expBlob = await compressImage(file);
+    $('exp-preview').innerHTML = `<img src="${URL.createObjectURL(expBlob)}" style="max-height:160px;border-radius:8px;border:1px solid var(--border2);">`;
+    await expRead();
+  } catch(e) { $('exp-status').textContent = 'Could not use that photo: ' + e.message; }
+}
+
+async function expRead() {
+  const key = ($('rego-api-key').value.trim()) || regoKey;
+  if(!key) { $('exp-status').textContent = 'Photo attached. Add your API key on the Rego Extractor tab to auto-read receipts, or fill in the details below.'; return; }
+  $('exp-status').innerHTML = '<span class="ai-thinking">Reading receipt…</span>';
+  try {
+    const b64 = await fileToBase64(expBlob);
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body: JSON.stringify({ model: EXP_MODEL, max_tokens: 500, messages:[{role:'user',content:[
+        {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
+        {type:'text',text:'Read this New Zealand receipt or tax invoice. Reply with ONLY a JSON object, no other text: {"supplier":"","date":"YYYY-MM-DD or empty","total":number GST inclusive,"gst":number or null,"gst_number":"supplier GST number if printed, else empty","category":"one of: ' + EXP_CATS.join(', ') + '","description":"short summary of what was bought"}'}
+      ]}]})
+    });
+    if(!resp.ok) { let msg = 'HTTP ' + resp.status; try { msg = JSON.parse(await resp.text()).error.message || msg; } catch(e) {} throw new Error(msg); }
+    const data = await resp.json();
+    const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    const j = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}')+1));
+    if(j.supplier) $('exp-supplier').value = j.supplier;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(j.date||'')) $('exp-date').value = j.date;
+    if(j.total) {
+      $('exp-total').value = Number(j.total).toFixed(2); expGstTouched = false; expAutoGst();
+      if(j.gst != null && j.gst !== '') { $('exp-gst').value = Number(j.gst).toFixed(2); expGstTouched = true; }
+    }
+    if(EXP_CATS.includes(j.category)) $('exp-cat').value = j.category;
+    if(j.description) $('exp-desc').value = j.description;
+    $('exp-gstno').value = j.gst_number ? '1' : '0';
+    $('exp-status').textContent = 'Check the details below, then save.';
+  } catch(e) { $('exp-status').textContent = 'Could not read the receipt (' + e.message + '). Fill in the details manually.'; }
+}
+
+function expReset() {
+  ['exp-supplier','exp-desc','exp-total','exp-gst','exp-ref'].forEach(id => $(id).value = '');
+  $('exp-date').value = today(); $('exp-preview').innerHTML = ''; $('exp-status').textContent = '';
+  expBlob = null; expGstTouched = false;
+}
+
+async function saveExpense() {
+  const supplier = $('exp-supplier').value.trim(), total = parseFloat($('exp-total').value)||0, date = $('exp-date').value;
+  if(!supplier || !total || !date) return alert('Supplier, date and total are required.');
+  let gst = parseFloat($('exp-gst').value); if(isNaN(gst)) gst = total*3/23;
+  const id = Date.now();
+  const rec = { id, date, supplier, desc:$('exp-desc').value.trim(), total:r2(total), gst:r2(gst), cat:$('exp-cat').value, ref:$('exp-ref').value.trim(), paid:$('exp-paid').value, gstNo:$('exp-gstno').value==='1', img:false };
+  if(expBlob) { try { await idbPut(id, expBlob); rec.img = true; } catch(e) { alert('The receipt photo could not be stored, so this expense was saved without it.'); } }
+  expList.push(rec); save('expenses', expList);
+  gstEntries.push({ id, type:'expense', desc:(rec.supplier + (rec.desc ? ' – ' + rec.desc : '')).replace(/[<>&]/g,''), amount:rec.total, date:rec.date, gst:rec.gst, exp:true });
+  save('gstEntries', gstEntries); renderGST();
+  expReset(); renderExpenses();
+}
+
+function expFiltered() { const m = $('exp-month').value; return expList.filter(e => !m || e.date.startsWith(m)).sort((a,b) => b.date.localeCompare(a.date)); }
+
+function renderExpenses() {
+  const list = expFiltered();
+  const flagged = e => e.total > 50 && !e.gstNo;
+  $('exp-stat-total').textContent = fmtMoney(list.reduce((s,e)=>s+e.total,0));
+  $('exp-stat-gst').textContent = fmtMoney(list.reduce((s,e)=>s+e.gst,0));
+  $('exp-stat-count').textContent = list.length;
+  $('exp-stat-flag').textContent = list.filter(flagged).length;
+  const tb = $('exp-tbody');
+  if(!list.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">No expenses yet</td></tr>'; return; }
+  tb.innerHTML = list.map(e => `<tr>
+    <td>${e.img ? `<img class="exp-thumb" data-eid="${e.id}" onclick="expView(${e.id})">` : ''}</td>
+    <td class="mono">${e.date}</td>
+    <td>${esc(e.supplier)}${e.desc ? '<div class="stat-sub">' + esc(e.desc) + '</div>' : ''}${flagged(e) ? '<span class="badge badge-amber">Check invoice</span>' : ''}</td>
+    <td>${esc(e.cat)}${e.ref ? '<div class="stat-sub">' + esc(e.ref) + '</div>' : ''}</td>
+    <td class="mono">${fmtMoney(e.total)}</td>
+    <td class="mono">${fmtMoney(e.gst)}</td>
+    <td><button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">Remove</button></td>
+  </tr>`).join('');
+  list.filter(e => e.img).forEach(async e => {
+    try { const b = await idbGet(e.id), el = document.querySelector(`img[data-eid="${e.id}"]`); if(b && el) el.src = URL.createObjectURL(b); } catch(x) {}
+  });
+}
+
+async function expView(id) {
+  try { const b = await idbGet(id); if(!b) return; $('exp-viewer-img').src = URL.createObjectURL(b); $('exp-viewer').style.display = 'flex'; } catch(e) {}
+}
+
+async function deleteExpense(id) {
+  if(!confirm('Remove this expense and its receipt photo? It will also be removed from the GST tab.')) return;
+  try { await idbDel(id); } catch(e) {}
+  expList = expList.filter(e => e.id !== id); save('expenses', expList);
+  gstEntries = gstEntries.filter(e => !(e.exp && e.id === id)); save('gstEntries', gstEntries);
+  renderGST(); renderExpenses();
+}
+
+function expDownload(name, blob) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function expCSV() {
+  const q = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
+  const rows = [['Date','Supplier','Description','Category','Job/Rego','Paid with','Total incl GST','GST','Ex GST','Supplier GST no.']];
+  expFiltered().forEach(e => rows.push([e.date,e.supplier,e.desc,e.cat,e.ref,e.paid,e.total.toFixed(2),e.gst.toFixed(2),(e.total-e.gst).toFixed(2),e.gstNo?'Yes':'No']));
+  expDownload('evolve-expenses-' + ($('exp-month').value || 'all') + '.csv', new Blob([rows.map(r => r.map(q).join(',')).join('\n')], {type:'text/csv'}));
+}
+
+async function expBackup() {
+  const images = {};
+  for(const e of expList) { if(e.img) { try { const b = await idbGet(e.id); if(b) images[e.id] = 'data:image/jpeg;base64,' + await fileToBase64(b); } catch(x) {} } }
+  expDownload('evolve-expenses-backup-' + today() + '.json', new Blob([JSON.stringify({expenses:expList, images})], {type:'application/json'}));
+}
+
+async function expRestore(inp) {
+  const file = inp.files[0]; inp.value = '';
+  if(!file) return;
+  try {
+    const data = JSON.parse(await file.text()); let added = 0;
+    for(const e of (data.expenses||[])) {
+      if(expList.some(x => x.id === e.id)) continue;
+      const url = (data.images||{})[e.id];
+      if(url) { try { await idbPut(e.id, await (await fetch(url)).blob()); e.img = true; } catch(x) { e.img = false; } }
+      expList.push(e); added++;
+      if(!gstEntries.some(g => g.exp && g.id === e.id)) gstEntries.push({ id:e.id, type:'expense', desc:(e.supplier + (e.desc ? ' – ' + e.desc : '')).replace(/[<>&]/g,''), amount:e.total, date:e.date, gst:e.gst, exp:true });
+    }
+    save('expenses', expList); save('gstEntries', gstEntries); renderGST(); renderExpenses();
+    alert('Restored ' + added + ' expense' + (added===1?'':'s') + '.');
+  } catch(e) { alert('That file could not be restored: ' + e.message); }
+}
+
+renderExpenses();
 </script>
 
 </html>
